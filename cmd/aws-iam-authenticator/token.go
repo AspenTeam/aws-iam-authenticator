@@ -50,16 +50,24 @@ var tokenCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "could not get token: %v\n", err)
 			os.Exit(1)
 		}
-		if roleARN != "" {
-			// if a role was provided, assume that role for the token
-			tok, err = gen.GetWithRole(clusterID, roleARN)
+
+		t := GetCachedToken(clusterID, roleARN)
+		if t != nil {
+			tok = *t
 		} else {
-			// otherwise sign the token with immediately available credentials
-			tok, err = gen.Get(clusterID)
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "could not get token: %v\n", err)
-			os.Exit(1)
+			if roleARN != "" {
+				// if a role was provided, assume that role for the token
+				tok, err = gen.GetWithRole(clusterID, roleARN)
+			} else {
+				// otherwise sign the token with immediately available credentials
+				tok, err = gen.Get(clusterID)
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "could not get token: %v\n", err)
+				os.Exit(1)
+			} else {
+				CacheToken(clusterID, roleARN, tok)
+			}
 		}
 		if tokenOnly {
 			out = tok.Token
