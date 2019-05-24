@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis"
-	"github.com/kubernetes-sigs/aws-iam-authenticator/pkg/token"
+	"sigs.k8s.io/aws-iam-authenticator/pkg/token"
 )
 
 var redisClient *redis.Client
