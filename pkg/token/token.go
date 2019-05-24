@@ -29,13 +29,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws/credentials"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
-	"github.com/kubernetes-sigs/aws-iam-authenticator/pkg/arn"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientauthv1alpha1 "k8s.io/client-go/pkg/apis/clientauthentication/v1alpha1"
+	"sigs.k8s.io/aws-iam-authenticator/pkg/arn"
 )
 
 // Identity is returned on successful Verify() results. It contains a parsed
@@ -156,12 +158,14 @@ type Generator interface {
 
 type generator struct {
 	forwardSessionName bool
+	cache              bool
 }
 
 // NewGenerator creates a Generator and returns it.
-func NewGenerator(forwardSessionName bool) (Generator, error) {
+func NewGenerator(forwardSessionName bool, cache bool) (Generator, error) {
 	return generator{
 		forwardSessionName: forwardSessionName,
+		cache:              cache,
 	}, nil
 }
 
@@ -190,11 +194,26 @@ func (g generator) GetWithRole(clusterID string, roleARN string) (Token, error) 
 	if err != nil {
 		return Token{}, fmt.Errorf("could not create session: %v", err)
 	}
+	if g.cache {
+		// figure out what profile we're using
+		var profile string
+		if v := os.Getenv("AWS_PROFILE"); len(v) > 0 {
+			profile = v
+		} else {
+			profile = session.DefaultSharedConfigProfile
+		}
+		// create a cacheing Provider wrapper around the Credentials
+		if cacheProvider, err := NewFileCacheProvider(clusterID, profile, roleARN, sess.Config.Credentials); err == nil {
+			sess.Config.Credentials = credentials.NewCredentials(&cacheProvider)
+		} else {
+			_, _ = fmt.Fprintf(os.Stderr, "unable to use cache: %v\n", err)
+		}
+	}
 
 	return g.GetWithRoleForSession(clusterID, roleARN, sess)
 }
 
-// GetWithRole assumes the given AWS IAM role for the given session and behaves
+// GetWithRoleForSession assumes the given AWS IAM role for the given session and behaves
 // like GetWithRole.
 func (g generator) GetWithRoleForSession(clusterID string, roleARN string, sess *session.Session) (Token, error) {
 	// use an STS client based on the direct credentials
@@ -390,13 +409,14 @@ func (v tokenVerifier) Verify(token string) (*Identity, error) {
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode != 200 {
-		return nil, NewSTSError(fmt.Sprintf("error from AWS (expected 200, got %d)", response.StatusCode))
-	}
 
 	responseBody, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return nil, NewSTSError(fmt.Sprintf("error reading HTTP result: %v", err))
+	}
+
+	if response.StatusCode != 200 {
+		return nil, NewSTSError(fmt.Sprintf("error from AWS (expected 200, got %d). Body: %s", response.StatusCode, string(responseBody[:])))
 	}
 
 	var callerIdentity getCallerIdentityWrapper
