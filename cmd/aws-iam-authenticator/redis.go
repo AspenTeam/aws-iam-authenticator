@@ -29,7 +29,7 @@ func GetCachedToken(clusterID, roleARN string) *token.Token {
 		key := _cacheKey(clusterID, roleARN)
 		cacheResult, err := redisClient.Get(key).Result()
 		if err != nil {
-			log.Println("error readying cache", err)
+			log.Println("error reading cache", err)
 			return nil
 		}
 		cachedToken := &token.Token{}
